@@ -17,7 +17,8 @@ import {
   Clock,
   Sparkles,
   PhoneCall,
-  CheckCircle2
+  CheckCircle2,
+  MessageCircle
 } from 'lucide-react';
 import { IMAGES } from '../constants/images';
 import { SERVICES, ARTICLES, TESTIMONIALS, FAQ_DATA, Article } from '../data';
@@ -52,7 +53,7 @@ export function HomeView({ onNavigate, onReadArticle }: HomeViewProps) {
   // FAQ ACCORDION INDICES
   const [openFaq, setOpenFaq] = useState<string | null>('faq-1');
 
-  // Trigger Backend-Powered RAB calculation
+  // Trigger Backend-Powered RAB calculation with client-side fallback
   const handleCalculateRAB = async (e: FormEvent) => {
     e.preventDefault();
     setIsCalculating(true);
@@ -69,32 +70,102 @@ export function HomeView({ onNavigate, onReadArticle }: HomeViewProps) {
         })
       });
 
-      const resJson = await response.json();
-      if (resJson.success) {
-        setRabResult(resJson.data);
-      } else {
-        setCalcError(resJson.message || 'Perhitungan gagal.');
+      if (response.ok) {
+        const resJson = await response.json();
+        if (resJson.success) {
+          setRabResult(resJson.data);
+          setIsCalculating(false);
+          return;
+        }
       }
+      throw new Error('Fallback to local calculation');
     } catch (err) {
-      setCalcError('Gagal terhubung dengan server kalkulator.');
+      // Robust local calculation so that this always works regardless of hosting environment!
+      const area = parseFloat(areaSize.toString());
+      const floors = parseInt(floorsCount.toString(), 10);
+
+      if (!isNaN(area) && area > 0 && !isNaN(floors) && floors > 0) {
+        let ratePerMeter = 3500000;
+        let qualityLabel = 'Standar';
+
+        if (materialQuality === 'medium') {
+          ratePerMeter = 4400000;
+          qualityLabel = 'Medium';
+        } else if (materialQuality === 'premium') {
+          ratePerMeter = 5300000;
+          qualityLabel = 'Premium';
+        }
+
+        let floorMultiplier = 1.0;
+        if (floors === 2) {
+          floorMultiplier = 1.85;
+        } else if (floors >= 3) {
+          floorMultiplier = 2.65 * (floors / 3);
+        }
+
+        const totalEstimatedCost = area * ratePerMeter * floorMultiplier;
+
+        const breakdown = {
+          struktur: Math.round(totalEstimatedCost * 0.40),
+          finishing: Math.round(totalEstimatedCost * 0.35),
+          atapPlafon: Math.round(totalEstimatedCost * 0.15),
+          mep: Math.round(totalEstimatedCost * 0.10)
+        };
+
+        setRabResult({
+          area,
+          floors,
+          materialQuality: qualityLabel,
+          ratePerMeter,
+          totalEstimatedCost: Math.round(totalEstimatedCost),
+          breakdown
+        });
+      } else {
+        setCalcError('Parameter ukuran bangunan atau lantai tidak valid.');
+      }
     } finally {
       setIsCalculating(false);
     }
   };
 
-  // Run calculation immediately on load so user sees calculations
+  // Run calculation immediately on load so user sees calculations with resilient fallback
   useEffect(() => {
-    // Mock calculate triggering
     fetch('/api/rab/calculate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ areaSize: 100, floorsCount: 1, materialQuality: 'medium' })
     })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success) setRabResult(d.data);
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        return r.json();
       })
-      .catch(() => {});
+      .then((d) => {
+        if (d.success) {
+          setRabResult(d.data);
+        } else {
+          throw new Error();
+        }
+      })
+      .catch(() => {
+        // Fallback calculation for initial load
+        const area = 100;
+        const floors = 1;
+        const ratePerMeter = 4400000; // Medium
+        const totalEstimatedCost = area * ratePerMeter * 1.0;
+        setRabResult({
+          area,
+          floors,
+          materialQuality: 'Medium',
+          ratePerMeter,
+          totalEstimatedCost,
+          breakdown: {
+            struktur: Math.round(totalEstimatedCost * 0.40),
+            finishing: Math.round(totalEstimatedCost * 0.35),
+            atapPlafon: Math.round(totalEstimatedCost * 0.15),
+            mep: Math.round(totalEstimatedCost * 0.10)
+          }
+        });
+      });
   }, []);
 
   const formatRupiah = (num: number) => {
@@ -505,8 +576,27 @@ export function HomeView({ onNavigate, onReadArticle }: HomeViewProps) {
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t border-zinc-800 text-[11px] text-zinc-400 italic text-center leading-relaxed">
-                    *RAB Kasar ini bersifat estimasi awal. Untuk komitmen harga total lump-sum mengikat fisik, Silakan klik tombol 'Mulai Konsultasi' agar tim teknik sipil JK Building melaksanakan survey lokasi lapangan gratis.
+                  <div className="pt-4 border-t border-zinc-800 space-y-4">
+                    <a
+                      href={`https://wa.me/6285601448180?text=${encodeURIComponent(
+                        `Halo JK Building Jogjakarta, saya ingin berkonsultasi mengenai estimasi RAB kasar bangunan saya:\n\n` +
+                        `• Luas Bangunan: ${rabResult.area} m² (${rabResult.floors} Lantai)\n` +
+                        `• Jenis Material: Spesifikasi ${rabResult.materialQuality}\n` +
+                        `• Biaya Rata-rata: ${formatRupiah(rabResult.ratePerMeter)} / m²\n` +
+                        `• Estimasi Total RAB: ${formatRupiah(rabResult.totalEstimatedCost)}\n\n` +
+                        `Apakah saya bisa berkonsultasi lebih lanjut mengenai detail pembangunan dan membuat janji survey lokasi? Terima kasih.`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-4 bg-orange-600 hover:bg-orange-750 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all duration-300 flex items-center justify-center gap-2.5 shadow-lg hover:shadow-orange-650/10 cursor-pointer text-center"
+                    >
+                      <MessageCircle className="w-4 h-4 shrink-0" />
+                      Lanjut ke WhatsApp untuk Membahas Hasil RAB ini
+                    </a>
+
+                    <p className="text-[10px] text-zinc-500 italic text-center leading-relaxed block">
+                      *Estimasi ini bersifat acuan kasar awal. Silakan jadwalkan survey lapangan gratis melalui WhatsApp agar tim ahli teknik sipil kami dapat menyusun kontrak harga borongan final yang mengikat secara aman.
+                    </p>
                   </div>
                 </div>
               ) : (
