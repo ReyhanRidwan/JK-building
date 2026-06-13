@@ -1,0 +1,10 @@
+{
+  "name": "JK Building",
+  "description": "Premium construction and renovation services by JK Building, based in Prambanan, Yogyakarta. Built for generations with precision and supreme strength.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
